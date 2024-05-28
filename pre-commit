@@ -1,0 +1,59 @@
+#!/bin/bash
+# Path to your SonarQube Scanner CLI executable
+SONAR_SCANNER_CLI_PATH="C:/Sonarscanner/sonar-scanner-5.0.1.3006-windows/bin/sonar-scanner.bat"
+# Path to your project directory
+PROJECT_DIR="C:\Users\DELL\pre-commit"
+# Path to the directory to store scanner report
+REPORT_DIR="${PROJECT_DIR}/.scannerwork"
+# Path to your SonarQube server
+SONAR_SERVER="http://localhost:9000"
+# SonarQube project key
+PROJECT_KEY="local"
+# SonarQube authentication token
+SONAR_TOKEN="squ_854e072785f5c83d6bfe8a6230994b448ee2766b"
+# Fetch SonarQube metrics from the scanner report
+fetch_metrics_from_report() {
+    local REPORT_FILE="${REPORT_DIR}/sonar-scanner-report-task.txt"
+    if [ -f "$REPORT_FILE" ]; then
+        CODE_COVERAGE=$(grep -o 'code_coverage=[^,]*' "$REPORT_FILE" | cut -d '=' -f2)
+        CODE_SMELLS=$(grep -o 'code_smells=[^,]*' "$REPORT_FILE" | cut -d '=' -f2)
+        BUGS=$(grep -o 'bugs=[^,]*' "$REPORT_FILE" | cut -d '=' -f2)
+        VULNERABILITIES=$(grep -o 'vulnerabilities=[^,]*' "$REPORT_FILE" | cut -d '=' -f2)
+    else
+        CODE_COVERAGE="N/A"
+        CODE_SMELLS="N/A"
+        BUGS="N/A"
+        VULNERABILITIES="N/A"
+    fi
+}
+# Execute SonarQube scan for latest commit
+LATEST_COMMIT_FILES=$(git diff --name-only --diff-filter=ACMRTUXB HEAD^ HEAD)
+for FILE in $LATEST_COMMIT_FILES; do
+    "${SONAR_SCANNER_CLI_PATH}" \
+    -Dsonar.projectKey="${PROJECT_KEY}" \
+    -Dsonar.sources="${PROJECT_DIR}" \
+    -Dsonar.host.url="${SONAR_SERVER}" \
+    -Dsonar.login="${SONAR_TOKEN}" \
+    -Dsonar.scanner.metadataFilePath="${REPORT_DIR}/sonar-scanner-report-task.txt"
+    # Check SonarQube scan result
+    if [ $? -ne 0 ]; then
+        echo "SonarQube scan failed for ${FILE}. Please fix the issues before committing."
+        exit 1
+    fi
+done
+# Fetch SonarQube metrics from the scanner report
+fetch_metrics_from_report
+# Display SonarQube metrics
+echo "SonarQube Metrics:"
+echo "Code Coverage: ${CODE_COVERAGE}"
+echo "Code Smells: ${CODE_SMELLS}"
+echo "Bugs: ${BUGS}"
+echo "Vulnerabilities: ${VULNERABILITIES}"
+# Check if Quality Gate is passed for the project
+QUALITY_GATE_STATUS=$(curl -s "${SONAR_SERVER}/api/qualitygates/project_status?projectKey=${PROJECT_KEY}&branch=" \
+  -u "${SONAR_TOKEN}": | grep -o '"status":"[^"]*' | grep -o '[^"]*$')
+if [ "$QUALITY_GATE_STATUS" != "OK" ]; then
+    echo "Quality Gate check failed. Please fix the issues before committing."
+    exit 1
+fi
+exit 0
